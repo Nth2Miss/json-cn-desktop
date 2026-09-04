@@ -1,0 +1,16 @@
+node_modules
+dist
+src-tauri/target
+.DS_Store
+*.log
+.DS_Store
+Thumbs.db
+.env
+.env.local
+.vscode/
+.idea/
+*.exe
+*.msi
+*.nsis
+icon-preview*.png
+favicon.ico

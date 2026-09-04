@@ -1,0 +1,23 @@
+[package]
+name = "json-cn-desktop"
+version = "0.1.0"
+description = "JSON在线解析桌面版 - 基于 json.cn"
+authors = ["Soyorin"]
+edition = "2021"
+repository = ""
+rust-version = "1.77.2"
+
+[build-dependencies]
+tauri-build = { version = "2.0.0", features = [] }
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri = { version = "2.0.0", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-opener = "2"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
