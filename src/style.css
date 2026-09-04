@@ -158,6 +158,16 @@ button { font-family: inherit; }
 .json-target [data-type] > i { cursor: pointer; margin-right: 6px; color: var(--muted); }
 .json-target [data-type] > i:hover { color: var(--primary); }
 
+/* Virtual scroll - 大文件 */
+.virtual-scroller { position: relative; overflow: auto; height: 100%; flex:1; background: var(--format-bg); }
+.virtual-spacer { position: absolute; left:0; right:0; top:0; pointer-events:none; }
+.virtual-content { position: absolute; left:0; right:0; top:0; }
+.virtual-row { height: 20px; line-height:20px; font-family:"JetBrains Mono",Consolas,monospace; font-size:13px; white-space:pre; overflow:hidden; padding:0 14px; }
+.virtual-row .json_nbsp { letter-spacing:4px; }
+.virtual-mode .json-format-container { overflow:hidden; padding:0; }
+.virtual-mode #line-num { display:none; }
+.virtual-bar { position:absolute; left:0; top:0; bottom:0; width:44px; background:var(--code-bg); border-right:1px solid var(--border); pointer-events:none; }
+
 /* Show line numbers mode */
 .input-gap { display: flex; background: var(--code-bg); border-right: 1px solid var(--border); padding: 14px 8px; }
 .textarea-lines { font-family: "JetBrains Mono", monospace; font-size: 13px; line-height: 20px; color: var(--muted); text-align: right; min-width: 32px; user-select: none; }

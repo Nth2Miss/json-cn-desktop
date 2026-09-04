@@ -185,6 +185,58 @@ const JSONFormat = (function () {
   return Cls;
 })();
 
+// ===== Worker + Virtual Scroll =====
+let worker = null;
+let reqId = 0;
+let virtualLines = [];
+let virtualEnabled = false;
+const ROW_H = 20;
+const VIRTUAL_THRESHOLD = 2000; // 超过此行数启用虚拟滚动
+const WORKER_THRESHOLD = 500 * 1024; // 超过 500KB 走 Worker
+try {
+  worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+} catch (e) { console.warn("Worker not supported, fallback to sync", e); }
+
+function enableVirtual(lines){
+  virtualEnabled = true;
+  virtualLines = lines;
+  jsonTarget.style.display = "none";
+  const scroller = document.getElementById("virtualScroller");
+  const spacer = document.getElementById("virtualSpacer");
+  scroller.style.display = "block";
+  spacer.style.height = (lines.length * ROW_H) + "px";
+  document.getElementById("jsonFormatContainer").classList.add("virtual-mode");
+  scroller.onscroll = renderVirtual;
+  renderVirtual();
+  setTimeout(renderVirtual, 0);
+}
+function disableVirtual(){
+  virtualEnabled = false;
+  virtualLines = [];
+  jsonTarget.style.display = "";
+  document.getElementById("virtualScroller").style.display = "none";
+  document.getElementById("jsonFormatContainer").classList.remove("virtual-mode");
+  document.getElementById("virtualScroller").onscroll = null;
+}
+function renderVirtual(){
+  if(!virtualEnabled) return;
+  const scroller = document.getElementById("virtualScroller");
+  const content = document.getElementById("virtualContent");
+  const scrollTop = scroller.scrollTop;
+  const viewH = scroller.clientHeight || 400;
+  const visible = Math.ceil(viewH / ROW_H) + 10;
+  const start = Math.max(0, Math.floor(scrollTop / ROW_H) - 5);
+  const end = Math.min(virtualLines.length, start + visible);
+  content.style.transform = `translateY(${start * ROW_H}px)`;
+  let html = "";
+  for(let i=start;i<end;i++) html += `<div class="virtual-row">${virtualLines[i]}</div>`;
+  content.innerHTML = html;
+  let lineHtml = "";
+  for(let i=start;i<end;i++) lineHtml += `<div style="height:${ROW_H}px;line-height:${ROW_H}px">${i+1}</div>`;
+  lineNumEl.innerHTML = lineHtml;
+  lineNumEl.style.transform = `translateY(${start*ROW_H}px)`;
+}
+
 // ===== DOM & State =====
 const $ = (s) => document.querySelector(s);
 const jsonSrc = $("#json-src");
@@ -256,9 +308,10 @@ function initFlags() {
   // 不重置 shown_flag
 }
 
-// 核心渲染 - 移植原站 $('#json-src').keyup 逻辑
+// 核心渲染 - Worker 优先，虚拟滚动兜底
 function doParseAndRender() {
   initFlags();
+  disableVirtual();
   const raw = jsonSrc.value.trim();
   inputStats.textContent = `${jsonSrc.value.length} 字符 · ${jsonSrc.value.split("\n").length} 行`;
   if (!raw) {
@@ -273,7 +326,6 @@ function doParseAndRender() {
   editableTip.style.display = "none";
   if (shown_flag) jsonSrc.cols = calcMaxWords(raw);
   let content = raw;
-  let result = "";
   // XML 自动识别
   if (content[0] === "<" && content[content.length - 1] === ">") {
     isXml = true;
@@ -281,18 +333,72 @@ function doParseAndRender() {
       const j = xml2json(content);
       content = JSON.stringify(j);
     } catch (e) {
-      result = `解析错误：<span style="color:#f1592a;font-weight:bold;">${e.message}</span>`;
+      const result = `解析错误：<span style="color:#f1592a;font-weight:bold;">${e.message}</span>`;
       jsonTarget.innerHTML = result;
       inputError.textContent = e.message;
       setStatus("XML 解析失败: " + e.message, "error");
       return;
     }
   }
+  let parseContent = content;
+  if (cancelZY.checked) {
+    parseContent = parseContent.replace(/\\/g, "\\\\").replace(/\\"/g, '\\\\"');
+  }
+  // 大文件走 Worker + 虚拟滚动
+  const useWorker = worker && (parseContent.length > WORKER_THRESHOLD || parseContent.split("\n").length > VIRTUAL_THRESHOLD);
+  if (useWorker) {
+    reqId++;
+    const curId = reqId;
+    setStatus("解析中... (Worker)", "warn");
+    statusDot.className = "status-dot warn";
+    // 超时回退
+    const timer = setTimeout(()=>{
+      if(reqId===curId && pending!==curId){
+        toast("Worker 解析超时，回退同步","warn");
+        worker.terminate?.();
+        try{ worker = new Worker(new URL("./worker.js", import.meta.url), { type:"module" }); }catch{}
+        fallbackSync(parseContent);
+      }
+    }, 8000);
+    worker.onmessage = (e)=>{
+      clearTimeout(timer);
+      const { id, ok, lines, topCount, error, ms } = e.data;
+      if(id !== curId) return;
+      pending = id;
+      if(ok){
+        const useVirtual = lines.length >= VIRTUAL_THRESHOLD;
+        if(useVirtual){
+          enableVirtual(lines);
+          inputError.textContent = "";
+          setStatus(`已格式化 · ${lines.length} 行 · ${topCount} 顶级字段 · ${ms}ms (虚拟滚动)`, "ok");
+          footerStatus.textContent = `虚拟滚动 · ${lines.length} 行 | ${ms}ms | ${Math.round(parseContent.length/1024)} KB`;
+        } else {
+          disableVirtual();
+          jsonTarget.innerHTML = lines.join("<br/>");
+          inputError.textContent = "";
+          setStatus(`已格式化 | ${topCount} 顶级字段 · ${ms}ms`, "ok");
+          setTimeout(renderLine,0);
+        }
+        current_content = parseContent;
+        current_json_str = parseContent.replace(/[\r\n]/g,"");
+        try{ current_json = JSON.parse(parseContent); }catch{ try{ current_json = jsonlint.parse(parseContent);}catch{ current_json=null; } }
+      } else {
+        disableVirtual();
+        jsonTarget.innerHTML = `<span style="color:#f1592a;font-weight:bold;">${error.replace(/</g,"&lt;")}</span>`;
+        inputError.textContent = String(error).split("\n")[0].slice(0,120);
+        setStatus("解析错误", "error");
+      }
+    };
+    worker.onerror = (e)=>{ clearTimeout(timer); console.error(e); toast("Worker 错误，回退同步","warn"); fallbackSync(parseContent); };
+    worker.postMessage({ id: curId, type:"parse", content: parseContent, cancelZY:false }); // cancelZY 已在主线程处理
+    return;
+  }
+  // 小文件同步回退
+  fallbackSync(parseContent);
+}
+function fallbackSync(parseContent){
+  let result = "";
   try {
-    let parseContent = content;
-    if (cancelZY.checked) {
-      parseContent = parseContent.replace(/\\/g, "\\\\").replace(/\\"/g, '\\\\"');
-    }
     current_json = jsonlint.parse(parseContent);
     current_json_str = parseContent.replace(/[\r\n]/g, "");
     current_content = parseContent;

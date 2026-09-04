@@ -14,3 +14,4 @@ Thumbs.db
 *.nsis
 icon-preview*.png
 favicon.ico
+src-tauri/gen
